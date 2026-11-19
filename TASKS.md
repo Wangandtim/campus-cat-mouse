@@ -7,10 +7,11 @@
 
 | ID | 任务 | 状态 | 优先级 |
 |---|---|---|---|
-| P0-0 | 工程基线与上下文 | [ ] 未开始 | 先做 |
-| P0-1 | MySQL + Redis 数据底座 | [ ] 未开始 | 高 |
+| P0-0 | 工程基线与上下文 | [x] 已完成 | 已完成 |
+| P0-1a | Redis + positions 最小底座 | [ ] 未开始 | 下一步 |
+| P0-1b | MySQL 完整迁移 | [ ] 未开始 | P0-4 后 |
 | P0-2 | 微信 OAuth + 学校身份 + 报名 | [ ] 未开始 | 高 |
-| P0-3 | Socket.IO + Redis GEO 实时位置 | [ ] 未开始 | 最高 |
+| P0-3 | Socket.IO + Redis GEO 实时位置 | [ ] 未开始 | 最高（P0-1a 后） |
 | P0-4 | 服务端距离/围栏/场次校验 | [ ] 未开始 | 最高 |
 | P0-5 | 教师后台 + Top20 邮件/约谈 | [ ] 未开始 | 高 |
 | P0-6 | 按班级导出 xlsx | [ ] 未开始 | 高 |
@@ -19,12 +20,14 @@
 ## 时间现实
 
 这套是生产级 P0，**不是 4 天能全部做完的**。  
-如果 2026-11-23 必须上线，优先：`P0-0` → `P0-3` → `P0-4`；  
+如果 2026-11-23 必须上线，优先：`P0-0` → `P0-1a` → `P0-3` → `P0-4`；`P0-1b` 放 P0-4 后。  
 `P0-2` 用名单/微信授权兜底；`P0-5`/`P0-6` 能手工就手工；`P0-7` 至少做限流 + 500 并发压测。
 
 ---
 
 ## P0-0：工程基线与上下文
+
+**状态**：已完成（本地基线提交 `e58b0d5`；`pnpm test` 6 项通过，`pnpm build` 通过）。
 
 **目标**：可回滚、可验收；不改功能。
 
@@ -40,19 +43,36 @@
 
 ---
 
-## P0-1：MySQL + Redis 数据底座
+## P0-1a：Redis + positions 最小底座
 
-**目标**：把本地 SQLite 预览适配到生产 MySQL 8 + Redis 7，保留本地预览能力。
+**目标**：先让 P0-3 有 Redis 和 positions 表，不做 MySQL 迁移。
 
-**允许改**：`server/database.mjs`、`server/index.mjs`、`server/api.mjs`、`server/db/*`、`package.json`、`.env.example`。
+**允许改**：`server/database.mjs`、`server/index.mjs`、`server/api.mjs`、`server/live/redis.mjs`、`package.json`、`.env.example`。
 
 **要做**
-1. MySQL 连接/迁移；Redis 连接。
+1. Redis 连接（`redis` 或 `ioredis`），启动时 ping 检查。
+2. `positions` 表先加在 SQLite：`user_id, role, lat, lng, accuracy, updated_at`。
+3. 最小位置读写接口，供 P0-3 使用。
+4. 不改积分/二维码/规则/UI。
+
+**验收**：Redis ping 通过；positions 可写/可查；`pnpm test` 通过；本地预览仍可跑。  
+**不要**：做 MySQL 迁移。
+
+---
+
+## P0-1b：MySQL 完整迁移
+
+**目标**：P0-4 跑通后，把预览 SQLite 适配到生产 MySQL 8，保留本地 SQLite 预览。
+
+**允许改**：`server/db/*`、`server/database.mjs`、`server/index.mjs`、`server/api.mjs`、`package.json`、`.env.example`。
+
+**要做**
+1. MySQL 连接/迁移。
 2. 核心表：`users`（姓名/学号/年级/学院/班级/电话/邮箱）、`event_sessions`、`positions`、`captures`、`points_ledger`、`points_accounts`、`points_session_accounts`、`audit_logs`。
 3. 唯一索引：`(event_id, session_id, cat_id, mouse_id)`；乐观锁字段。
-4. 保留 SQLite fallback，不影响现有预览。
+4. 保留 SQLite fallback，不影响本地预览。
 
-**验收**：MySQL/Redis 启动；迁移可重复执行；`pnpm test` 通过；本地预览仍可跑。  
+**验收**：MySQL 启动；迁移可重复执行；`pnpm test` 通过；本地预览仍可跑。  
 **不要**：改游戏规则/UI。
 
 ---

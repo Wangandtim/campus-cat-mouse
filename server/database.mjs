@@ -18,6 +18,14 @@ export function openDatabase(filename) {
       sharing INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS positions (
+      user_id TEXT NOT NULL PRIMARY KEY REFERENCES players(id),
+      role TEXT NOT NULL,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      accuracy REAL NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS progress (
       player_id TEXT NOT NULL REFERENCES players(id),
       stage TEXT NOT NULL,
@@ -71,4 +79,27 @@ export function openDatabase(filename) {
     );
   `);
   return db;
+}
+
+export function openPositionStore(filename) {
+  const db = openDatabase(filename);
+  const read = db.prepare(`
+    SELECT role, lat, lng, accuracy, updated_at FROM positions WHERE user_id = ?
+  `);
+  const write = db.prepare(`
+    INSERT INTO positions (user_id, role, lat, lng, accuracy, updated_at)
+    SELECT id, role, ?, ?, ?, ? FROM players WHERE id = ?
+    ON CONFLICT(user_id) DO UPDATE SET
+      role = excluded.role,
+      lat = excluded.lat,
+      lng = excluded.lng,
+      accuracy = excluded.accuracy,
+      updated_at = excluded.updated_at
+    RETURNING role, lat, lng, accuracy, updated_at
+  `);
+  return {
+    get: (userId) => read.get(userId) ?? null,
+    save: (userId, { lat, lng, accuracy }) => write.get(lat, lng, accuracy, Date.now(), userId),
+    close: () => db.close(),
+  };
 }

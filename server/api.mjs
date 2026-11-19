@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { openPositionStore } from './database.mjs';
 import { createGame, GameError } from './game.mjs';
 import { sessions } from './rules.mjs';
 
@@ -66,7 +67,22 @@ function checkedProfile(body) {
   return profile;
 }
 
-export function createPreviewApi(env, game = createGame(resolve('.campus', 'preview.sqlite3'))) {
+function checkedPosition(body) {
+  const { lat, lng, accuracy } = body;
+  if (!Number.isFinite(lat) || Math.abs(lat) > 90 ||
+      !Number.isFinite(lng) || Math.abs(lng) > 180 ||
+      !Number.isFinite(accuracy) || accuracy < 0) {
+    throw new GameError('POSITION', '请提交有效的坐标和定位精度。', 400);
+  }
+  return { lat, lng, accuracy };
+}
+
+export function createPreviewApi(env, game, positions) {
+  if (game === undefined) {
+    const filename = resolve('.campus', 'preview.sqlite3');
+    game = createGame(filename);
+    positions ??= openPositionStore(filename);
+  }
   const mapKey = env.AMAP_JS_KEY?.trim();
   const mapSecret = env.AMAP_SECURITY_CODE?.trim();
   const mapEnabled = !!(mapKey && mapSecret);
@@ -117,6 +133,15 @@ export function createPreviewApi(env, game = createGame(resolve('.campus', 'prev
         return json(res, 200, game.snapshot(player));
       }
       if (!player) throw new GameError('AUTH', '请重新进入活动页面。', 401);
+      if (url.pathname === '/api/preview/position' && positions) {
+        if (req.method === 'GET') return json(res, 200, positions.get(player.id));
+        if (req.method === 'POST') {
+          const coordinates = checkedPosition(await bodyOf(req));
+          const position = positions.save(player.id, coordinates);
+          if (!position) throw new GameError('AUTH', '请重新进入活动页面。', 401);
+          return json(res, 200, position);
+        }
+      }
       if (req.method === 'GET' && url.pathname === '/api/preview/leaderboard') {
         return json(res, 200, game.leaderboard(player, url.searchParams.get('range')));
       }

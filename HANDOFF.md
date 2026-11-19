@@ -3,7 +3,15 @@
 > 每个任务结束后更新本文件（5 行以内）。新任务开始时先读 `AGENTS.md`、`TASKS.md`、本文件。
 > 不要把代码、日志、长分析贴进来。
 
-## 当前状态
+## 最近一次交接
+
+- `P0-1a` 已验收。独立 Node 服务在配置 `REDIS_URL` 时启动检查 Redis。
+- 改动 Redis 连接、SQLite `positions` 和 `GET/POST /api/preview/position`。预览 Cookie 仅允许玩家读写本人的最新位置。
+- `pnpm test` 6/6，隔离 `pnpm build` 通过。真实 Redis 8.10.3 返回 `PONG`，旧库迁移、位置覆盖、玩家隔离、空配置预览和启动超时测试通过。
+- `REDIS_URL` 配置后，检查失败会阻止独立服务启动。运行中 Redis 断开需重启独立服务恢复连接。
+- 下一任务为 `P0-3`，Socket.IO + Redis GEO 实时位置。
+
+## P0-0 状态快照
 
 - 日期：2026-11-19
 - 项目：`D:\果冻校园内置游戏`
@@ -11,7 +19,7 @@
 - `P0-0` 工程基线已验收。
 - 下一步：`P0-1a`（Redis + positions 最小底座）→ `P0-3` 实时位置 → `P0-4` 抓捕校验；`P0-1b`（MySQL）后置。
 
-## 最近一次交接
+## P0-0 交接
 
 - 更新了 `HANDOFF.md`，建立本地 Git 基线。
 - `pnpm test` 通过 6 项，`pnpm build` 通过。Vite 使用临时环境目录。

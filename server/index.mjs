@@ -3,12 +3,19 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createPreviewApi } from './api.mjs';
+import { connectRedis } from './live/redis.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../dist');
 if (!existsSync(resolve(root, 'index.html'))) {
   console.error('请先运行 npm run build。');
   process.exit(1);
 }
+
+const redis = await connectRedis(process.env.REDIS_URL).catch(() => {
+  console.error('Redis 启动检查失败，请检查 REDIS_URL 和 Redis 服务。');
+  process.exit(1);
+});
+if (redis) console.log('Redis PING 返回 PONG。');
 
 const api = createPreviewApi(process.env);
 const mime = {

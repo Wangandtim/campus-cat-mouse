@@ -5,6 +5,14 @@
 
 ## 最近一次交接
 
+- `P0-1a` 重连补丁已验收，任务状态已勾选。Redis 启动 `PING` 的总超时为 5 秒。
+- 运行中最多重连 8 次，指数退避含抖动最多 2 秒。耗尽后记录错误，Node 服务继续运行，Redis 客户端保持离线。
+- `pnpm test` 6/6。真实 Redis 8.10.3 停启后原客户端恢复 `PONG`，重试耗尽和 5 秒启动超时均验证通过。
+- Redis 验收端口 `127.0.0.1:58505` 已释放，系统临时验收副本已清理。
+- 下一任务为 `P0-3`，Socket.IO + Redis GEO 实时位置。
+
+## P0-1a 初次验收
+
 - `P0-1a` 已验收。独立 Node 服务在配置 `REDIS_URL` 时启动检查 Redis。
 - 改动 Redis 连接、SQLite `positions` 和 `GET/POST /api/preview/position`。预览 Cookie 仅允许玩家读写本人的最新位置。
 - `pnpm test` 6/6，隔离 `pnpm build` 通过。真实 Redis 8.10.3 返回 `PONG`，旧库迁移、位置覆盖、玩家隔离、空配置预览和启动超时测试通过。

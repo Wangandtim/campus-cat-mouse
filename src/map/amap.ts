@@ -1,9 +1,10 @@
 import { wgs84togcj02 } from 'coordtransform';
-import { campus, request, type Position, type ZoneView } from '../model';
+import { campus, request, type Position, type Role, type ZoneView } from '../model';
 import { mapPalette } from './palette';
 
 type Overlay = { on(event: 'click', callback: () => void): void };
 type Marker = Overlay & { setPosition(position: Position): void };
+type LiveMarker = Readonly<{ lat: number; lng: number; role: Role }>;
 type AmapInstance = {
   on(event: 'complete', callback: () => void): void;
   off(event: 'complete', callback: () => void): void;
@@ -104,6 +105,13 @@ export async function createAmap(element: HTMLElement, select: (id: string) => v
   const fit = () => map.setFitView([boundary], true, [28, 32, 44, 32]);
   fit();
   let overlays: Overlay[] = [];
+  let liveOverlays: Marker[] = [];
+
+  function clearLiveMarkers() {
+    if (liveOverlays.length) map.remove(liveOverlays);
+    liveOverlays = [];
+  }
+
   return {
     setZones(zones: ZoneView[], selected: string) {
       if (overlays.length) map.remove(overlays);
@@ -131,12 +139,34 @@ export async function createAmap(element: HTMLElement, select: (id: string) => v
       });
       map.add(overlays);
     },
+    setLiveMarkers(markers: readonly LiveMarker[]) {
+      clearLiveMarkers();
+      liveOverlays = markers.map(({ lng, lat, role }) => {
+        const glyph = role === 'mouse' ? '鼠' : '猫';
+        const content = document.createElement('span');
+        content.className = `live-map-marker live-map-marker--${role}`;
+        content.textContent = glyph;
+        return new api.Marker({
+          position: wgs84togcj02(lng, lat),
+          content,
+          title: `实时${glyph}位置`,
+          anchor: 'center',
+          offset: new api.Pixel(0, 0),
+          zIndex: 120,
+          clickable: false,
+        });
+      });
+      if (liveOverlays.length) map.add(liveOverlays);
+    },
     zoomIn: () => map.zoomIn(),
     zoomOut: () => map.zoomOut(),
     center: (point: Position) => map.setCenter(wgs84togcj02(...point)),
     setPosition: (point: Position) => personal.setPosition(wgs84togcj02(...point)),
     fit,
     resize: () => map.resize?.(),
-    destroy: () => map.destroy(),
+    destroy() {
+      clearLiveMarkers();
+      map.destroy();
+    },
   };
 }

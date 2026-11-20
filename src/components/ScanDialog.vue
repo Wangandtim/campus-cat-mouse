@@ -4,7 +4,7 @@ import { Camera, Check, FlaskConical, ScanLine } from 'lucide-vue-next';
 import { ApiError, request, type CaptureResult, type IssuedCode, type ZoneView } from '../model';
 import GameDialog from './GameDialog.vue';
 
-const props = defineProps<{ zone: ZoneView; energy: number }>();
+const props = defineProps<{ zone: ZoneView; energy: number; demo: boolean }>();
 const emit = defineEmits<{ close: []; captured: [result: CaptureResult] }>();
 const code = ref('');
 const error = ref('');
@@ -123,10 +123,10 @@ onBeforeUnmount(() => { disposed = true; stopCamera(); });
         <button type="submit" class="primary-button" :disabled="!code.trim() || busy"><ScanLine :size="17" /> 确认</button>
       </div>
       <p v-if="error" class="inline-error" role="alert">{{ error }}</p>
-      <button class="preview-scan-button" type="button" :disabled="busy || (!canSimulate && !pending)" @click="submit('', true)">
+      <button v-if="demo" class="preview-scan-button" type="button" :disabled="busy || (!canSimulate && !pending)" @click="submit('', true)">
         <FlaskConical :size="17" /> {{ busy ? '校验中' : '模拟本点扫码' }}
       </button>
-      <p v-if="!canSimulate" class="field-feedback">
+      <p v-if="demo && !canSimulate" class="field-feedback">
         {{ energy < 100 ? `再移动 ${100 - energy} 米后可以模拟抓捕。` : zone.cooldown > 0 ? '当前区域冷却中。' : '请选择还有可用鼠迹的区域。' }}
       </p>
     </form>

@@ -2,8 +2,16 @@ import { createServer } from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createPreviewApi } from './api.mjs';
+import { createPreviewApi, createPreviewServices, openPreview } from './api.mjs';
+import { readEventSettings } from './admin/event-settings.mjs';
+import { openMysqlStore } from './db/mysql.mjs';
 import { connectRedis } from './live/redis.mjs';
+import { attachLivePositions } from './live/positions.mjs';
+import { scheduleSettlements } from './settlements.mjs';
+import { scheduleAdminJobs } from './admin/jobs.mjs';
+import { purgeExpiredExports } from './security/export-cleanup.mjs';
+import { createRateLimiter, limitLiveReports } from './security/rate-limit.mjs';
+import { retentionSettings } from './security/retention.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../dist');
 if (!existsSync(resolve(root, 'index.html'))) {
@@ -11,13 +19,44 @@ if (!existsSync(resolve(root, 'index.html'))) {
   process.exit(1);
 }
 
+const retention = retentionSettings(process.env);
 const redis = await connectRedis(process.env.REDIS_URL).catch(() => {
   console.error('Redis 启动检查失败，请检查 REDIS_URL 和 Redis 服务。');
   process.exit(1);
 });
 if (redis) console.log('Redis PING 返回 PONG。');
+const checkLimit = createRateLimiter({ env: process.env, redis });
 
-const api = createPreviewApi(process.env);
+const mysqlUrl = process.env.MYSQL_URL?.trim();
+const poolSize = Number(process.env.CAMPUS_MYSQL_POOL_SIZE?.trim() || 60);
+const testNow = process.env.CAMPUS_TEST_NOW?.trim();
+const testBase = testNow ? Date.parse(testNow) : NaN;
+if (testNow && process.env.NODE_ENV === 'production') {
+  console.error('production 禁止设置 CAMPUS_TEST_NOW。');
+  process.exit(1);
+}
+if (testNow && !Number.isFinite(testBase)) {
+  console.error('CAMPUS_TEST_NOW 不是有效时间。');
+  process.exit(1);
+}
+const startedAt = Date.now();
+const clock = testNow ? () => testBase + (Date.now() - startedAt) : Date.now;
+let services;
+if (mysqlUrl) {
+  try {
+    const store = await openMysqlStore(mysqlUrl, { poolSize });
+    console.log('MySQL 连接检查和迁移已通过。');
+    await readEventSettings(store, true);
+    services = createPreviewServices(store, clock);
+  } catch {
+    console.error('MySQL 启动检查或迁移失败。');
+    process.exit(1);
+  }
+} else {
+  services = openPreview(undefined, undefined, clock);
+  await readEventSettings(services.store, true);
+}
+const { game, liveGame, positions, purgeLocations, close } = services;
 const mime = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -28,7 +67,7 @@ const mime = {
   '.woff2': 'font/woff2',
 };
 
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   if (/^\/(api|_AMapService)(?:\/|$)/.test(url.pathname)) return void api(req, res);
   if (!['GET', 'HEAD'].includes(req.method)) {
@@ -37,20 +76,61 @@ const server = createServer((req, res) => {
   }
   const candidate = resolve(root, '.' + url.pathname);
   const withinDist = candidate.startsWith(root + sep);
-  const file = url.pathname === '/' ? resolve(root, 'index.html') : candidate;
-  if ((url.pathname !== '/' && !withinDist) || !existsSync(file) || !statSync(file).isFile()) {
+  const adminPage = url.pathname === '/admin' || url.pathname === '/admin/';
+  if (adminPage) {
+    try {
+      await checkLimit.requireRedis();
+    } catch (error) {
+      res.writeHead(503, { 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(req.method === 'HEAD' ? undefined : error.message);
+      return;
+    }
+  }
+  const appEntry = url.pathname === '/' || adminPage;
+  const file = appEntry ? resolve(root, 'index.html') : candidate;
+  if ((!appEntry && !withinDist) || !existsSync(file) || !statSync(file).isFile()) {
     res.writeHead(404).end();
     return;
   }
   res.writeHead(200, {
     'Content-Type': mime[extname(file)] ?? 'application/octet-stream',
     'Content-Length': statSync(file).size,
-    'Cache-Control': url.pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache',
+    'Cache-Control': adminPage ? 'no-store' : url.pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache',
     'X-Content-Type-Options': 'nosniff',
+    ...(adminPage ? { 'Content-Security-Policy': "frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' } : {}),
   });
   if (req.method === 'HEAD') res.end();
   else createReadStream(file).pipe(res);
 });
 
+const { io, profileChanged } = attachLivePositions(server, { game: liveGame, positions, redis, clock });
+limitLiveReports(io, checkLimit);
+const api = createPreviewApi(process.env, game, positions, profileChanged, checkLimit);
+await purgeExpiredExports(clock(), retention.exportRetentionMs)
+  .catch(() => console.warn('导出临时文件启动清理失败。'));
+const settlements = scheduleSettlements(async (now) => {
+  try {
+    await api.admin?.prepareSettlementDays(now);
+  } finally {
+    await game.settleDue(now);
+  }
+}, { clock, onError: () => console.error('场次结算失败，稍后补算。') });
+await settlements.ready;
+let locationCleanup;
+function purgeLocationsWhenIdle() {
+  locationCleanup ??= purgeLocations(clock(), retention.positionRetentionMs)
+    .catch(() => console.warn('过期位置清理失败，稍后重试。'))
+    .finally(() => { locationCleanup = undefined; });
+  return locationCleanup;
+}
+await purgeLocationsWhenIdle();
+const locationTimer = setInterval(purgeLocationsWhenIdle, retention.positionSweepMs);
+locationTimer.unref();
+const stopAdmin = api.admin && scheduleAdminJobs(api.admin, clock);
+server.once('close', () => {
+  clearInterval(locationTimer);
+  void Promise.all([settlements.stop(), stopAdmin?.(), locationCleanup]).then(close)
+    .catch(() => console.error('数据库关闭失败。'));
+});
 const port = Number(process.env.PORT || 4173);
 server.listen(port, '127.0.0.1', () => console.log(`校园追光预览 http://127.0.0.1:${port}`));

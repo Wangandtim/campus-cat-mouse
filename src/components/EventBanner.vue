@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { ChevronDown, Clock3, MapPin } from 'lucide-vue-next';
 import { campus, type GameState, type StageId } from '../model';
 
-const props = defineProps<{ stage: GameState['stage']; now: number; busy: boolean }>();
+const props = defineProps<{ stage: GameState['stage']; now: number; busy: boolean; demo: boolean }>();
 const emit = defineEmits<{ stage: [value: StageId] }>();
 
 const clock = computed(() => {
@@ -26,7 +26,7 @@ const clock = computed(() => {
     <div class="event-clock">
       <div class="clock-heading">
         <span class="live-mark" aria-hidden="true"></span>
-        <label class="stage-select">
+        <label v-if="demo" class="stage-select">
           <span class="sr-only">切换演示场次</span>
           <select :value="stage.id" :disabled="busy" @change="emit('stage', ($event.target as HTMLSelectElement).value as StageId)">
             <option value="evening">晚场演示</option>
@@ -34,6 +34,7 @@ const clock = computed(() => {
           </select>
           <ChevronDown :size="14" aria-hidden="true" />
         </label>
+        <span v-else class="stage-name">{{ stage.label }}</span>
       </div>
       <time class="event-clock-digits" aria-label="本场剩余时间">{{ clock }}</time>
       <span class="event-clock-label">本场剩余</span>

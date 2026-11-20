@@ -212,6 +212,7 @@ h1, h2, h3, p { margin: 0; }
 .clock-heading { display: flex; align-items: center; gap: 7px; }
 .live-mark { width: 7px; height: 7px; border-radius: 50%; background: #e77832; box-shadow: 0 0 0 3px #f5a46045; }
 .stage-select { display: inline-flex; align-items: center; gap: 4px; color: #503f5e; }
+.stage-name { color: #503f5e; font-size: 13px; font-weight: 700; }
 .stage-select select {
   appearance: none;
   max-width: 112px;

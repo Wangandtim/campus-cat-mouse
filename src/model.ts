@@ -27,8 +27,20 @@ export type GameState = {
     captures: number;
     energy: number;
     tracking: boolean;
+    balance?: number;
+    availablePoints?: number;
   };
-  captures: { id: string; mouseId: number; zoneId: string; award: number; at: number }[];
+  participation?: {
+    sessionId: string;
+    open: boolean;
+    status: 'idle' | 'active' | 'paused' | 'exited' | 'settled' | 'void';
+    dataGap: boolean;
+    startedAt: number | null;
+    completedAt: number | null;
+    deadline: number | null;
+    requiredMeters: number | null;
+  };
+  captures: { id: string; mouseId: number; zoneId: string; award: number; at: number; voided?: boolean }[];
   cooldowns: { zoneId: string; until: number }[];
   usedMouseCodeExpiry: number | null;
 };
@@ -45,9 +57,15 @@ export type RankRow = {
 export type ZoneView = Zone & { distance: number; available: number[]; cooldown: number };
 
 export class ApiError extends Error {
-  constructor(message: string, public code: string) {
+  constructor(message: string, public code: string, public status?: number) {
     super(message);
   }
+}
+
+export function apiResponseError(status: number, data: { message?: string; code?: string } | null,
+  fallback = '活动服务暂时不可用。') {
+  const message = status === 503 ? '服务繁忙，请稍后重试' : data?.message ?? fallback;
+  return new ApiError(message, data?.code ?? 'SERVER', status);
 }
 
 export async function request<T>(path: string, body?: object, id?: string): Promise<T> {
@@ -66,7 +84,7 @@ export async function request<T>(path: string, body?: object, id?: string): Prom
   }
   const data = await response.json().catch(() => null);
   if (!response.ok || data === null) {
-    throw new ApiError(data?.message ?? '活动服务暂时不可用。', data?.code ?? 'SERVER');
+    throw apiResponseError(response.status, data);
   }
   return data as T;
 }

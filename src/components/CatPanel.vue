@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 import { ArrowUpRight, Cat, ChevronDown, ChevronRight, Footprints, Rat, ScanLine, Zap } from 'lucide-vue-next';
 import { distanceLabel, kilometers, type GameState, type ZoneView } from '../model';
 
-const props = defineProps<{ stats: GameState['stats']; zones: ZoneView[]; selected: ZoneView }>();
+const props = defineProps<{ stats: GameState['stats']; zones: ZoneView[]; selected: ZoneView; sessionCap: number }>();
 const emit = defineEmits<{ select: [id: string]; scan: []; records: []; role: [] }>();
 const expanded = ref(false);
 const visibleZones = computed(() => {
@@ -22,7 +22,7 @@ const visibleZones = computed(() => {
       </div>
       <div class="mission-stats">
         <div><span>活动里程</span><strong>{{ kilometers(stats.meters) }} <small>km</small></strong></div>
-        <div><span>本场积分</span><strong>{{ stats.sessionPoints }} <small>/ 100</small></strong></div>
+        <div><span>本场积分</span><strong>{{ stats.sessionPoints }} <small>/ {{ sessionCap }}</small></strong></div>
       </div>
       <div class="energy">
         <div class="energy-label">

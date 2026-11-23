@@ -1,35 +1,127 @@
-# 猫鼠追缉令 · 西安欧亚学院
+# 校园猫鼠追缉令 H5
 
-这是可以独立打开的微信 H5 本地预览。演示账号、里程与抓捕记录保存在本机 SQLite。猫端和鼠端可在同一个浏览器切换，也可以在两个独立浏览器会话中分别体验。计划首场是 2026 年 11 月 23 日 06:30。
+西安欧亚学院校园猫鼠追缉令的完整 H5 + Node.js 服务端。
 
-## 本地启动
+**这个仓库不是只有演示版。** `server/` 是完整服务端，包含 MySQL 持久化、学号/微信身份、实时位置、抓捕、积分结算、教师后台、Top20、成绩导出；`demo` 只是本地体验模式之一。
 
-需要 Node.js 24。首次启动安装依赖，然后运行开发服务。
+## 技术栈
+
+- 前端：Vue 3 + Vite + TypeScript + Leaflet / 高德 JS API
+- 服务端：Node.js 24、Socket.IO、MySQL 8、Redis（生产推荐）
+- 测试：Node test runner、SQLite/MySQL 双路径
+
+## 本地体验
 
 ```sh
 pnpm install
 pnpm dev
 ```
 
-打开 [本地预览](http://127.0.0.1:4173/)。正式构建的本机预览可用 `pnpm build` 和 `pnpm start`，规则验证使用 `pnpm test`。
+打开 <http://127.0.0.1:4173/>。
+本地预览使用 SQLite，教师入口为 <http://127.0.0.1:4173/admin>。
+`mock`/`demo` 模式仅允许在 `development`/`test` 使用。
 
-## 体验主流程
+## 上线运行
 
-1. 地图中选择鼠迹区域，打开「扫码抓捕」，选择「模拟本点扫码」。成功后可在「排行榜」查看成绩。
-2. 到「运动记录」开始记录，模拟步行 100 米后可以继续抓捕。切换早场或晚场可体验独立场次额度。
-3. 从右上角「体验账号」切换鼠阵营。鼠端捕获码 30 秒更新，成功扫码后提前刷新。第二个浏览器会话可相机扫码或输入捕获码。
-4. 「高德底图」使用可选的地图配置。预览默认展示校区图。地图的定位按钮只在页面内使用浏览器返回的位置。
+### 1. 前置条件
 
-## 规则
+- Node.js 24
+- MySQL 8（生产必须，启动时自动迁移）
+- Redis 7（生产多实例/限流/实时位置推荐）
+- HTTPS 反向代理（Nginx / 云负载均衡）
+- 可用的 `CAMPUS_PUBLIC_ORIGIN`
 
-- 日榜和场次榜都按成功抓捕次数、完整里程、最早达成最终抓捕数的时间排序。最后按稳定 ID 处理完全并列。
-- 单次有效抓捕最多加 10 分，活动里程和抓捕共享每场 100 分、每天 200 分的额度。额度不足时仍记录有效抓捕，按剩余额度入账。
-- 同一请求重试读取原结果。每场每位猫对同一只鼠只计一次。虚拟点位在 30 秒内累计五次成功后，固定冷却 30 秒。
+### 2. 构建
 
-## 地图与上线准备
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+```
 
-- 校区边界来自 [OpenStreetMap way 246285594](https://www.openstreetmap.org/way/246285594)，底图矢量来自同一区域的 OpenStreetMap 数据，按 [ODbL](https://www.openstreetmap.org/copyright) 使用。五个鼠迹区是覆盖全校区视图的演示区域。上线前由学校核定围栏和现场停步扫码区域。
-- 高德 Web 端 Key 与安全密钥按 [.env.example](.env.example) 配置。Web 端 Key 供浏览器加载 SDK，安全密钥由同源服务端代理使用。[高德官方配置](https://lbs.amap.com/api/javascript-api-v2/guide/abc/jscode)
-- 猫鼠标志与追逐插画是原创生成的赛事素材，资源位于 `public/chase-mark.png` 和 `public/chase-mascots.webp`。
-- 这里的构建产物配套本机预览 API。该 API 会创建体验账号，提供模拟运动和演示捕获码，底图定位也仅用于在当前页面显示个人位置。
-- 全校发布需要接入独立微信授权和学生身份核验，由服务端校验实际活动场次、授权围栏与双端定位。正式域名和微信权限就绪后，应完成真机联调及 2,000 人峰值验收。
+`dist/` 是构建产物，不提交到仓库；部署时在服务器上构建，或由 CI 构建后发布。
+
+### 3. 环境变量
+
+复制并填写：
+
+```sh
+cp .env.example .env.local
+```
+
+生产至少需要：
+
+```text
+NODE_ENV=production
+PORT=4173
+CAMPUS_PUBLIC_ORIGIN=https://你的域名
+CAMPUS_AUTH_MODE=roster
+CAMPUS_JWT_SECRET=<至少 32 字节随机 base64url>
+MYSQL_URL=mysql://用户:密码@数据库:3306/库名
+CAMPUS_ROSTER_CSV=/绝对路径/roster.csv
+CAMPUS_TEACHER_ALLOWLIST=teacher
+CAMPUS_TEACHER_PASSWORD_HASHES={"teacher":"<scrypt hash>"}
+CAMPUS_TEACHER_JWT_SECRET=<与 CAMPUS_JWT_SECRET 不同的随机值>
+REDIS_URL=redis://...
+AMAP_JS_KEY=...
+AMAP_SECURITY_CODE=...
+```
+
+说明：
+
+- `CAMPUS_AUTH_MODE` 支持 `wechat`、`roster`、`mock`、`demo`。
+- 生产不要使用 `mock`/`demo`。
+- 生产必须使用 HTTPS；`roster` 模式要求 `CAMPUS_ROSTER_CSV` 在项目目录外。
+- `CAMPUS_TEST_NOW` 只允许本地验证，production 会直接拒绝启动。
+- `.env.local` 已被 `.gitignore` 忽略，禁止提交。
+
+### 4. 启动
+
+```sh
+pnpm start
+```
+
+服务默认监听 `127.0.0.1:4173`，由 Nginx/负载均衡提供 HTTPS 和公网入口。
+MySQL 表结构会在启动时自动迁移。
+
+### 5. 教师入口
+
+- 学生 H5：`https://你的域名/`
+- 教师后台：`https://你的域名/admin`
+
+教师可以配置活动开始日期和持续天数；活动开始后只能延长，不能缩短。
+
+## 功能
+
+- 学号 + 姓名 + 手机号后四位登录（当前 `roster` 模式）
+- 学生报名、猫/鼠阵营、实时位置共享
+- 二维码抓捕、距离/精度/围栏/体力校验
+- 场次结算、积分、里程、Top20
+- 教师后台、鼠阵营任命、约谈、换人
+- 按日成绩导出 + 活动总成绩累计导出（总榜 + 班级 sheet）
+
+## 测试
+
+```sh
+pnpm test
+```
+
+当前基线：74 通过 / 11 跳过 / 0 失败。MySQL 与 Redis 的跳过项需要对应服务后单独跑。
+
+## 安全与验收
+
+- 不提交真实学生名单、手机号、`.env.local` 或密钥。
+- AppSecret、数据库密码、教师密码哈希只放部署环境。
+- 2000 并发目前是单机回环压测结果，不等于生产容量结论；上线前必须在目标 HTTPS/MySQL/Redis/微信链路重新压测。
+- 真实定位、真实微信/小程序 WebView 仍需真机人工验证。
+
+## 目录
+
+```text
+src/            H5 前端
+server/         Node.js API、鉴权、游戏、后台、导出
+server/db/      MySQL / SQLite / 迁移
+server/live/    Socket.IO 实时位置
+server/admin/   教师后台、Top20、任命
+server/export/  XLSX 导出
+tests/load/     压测工具与报告
+```

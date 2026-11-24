@@ -124,6 +124,7 @@ pnpm test
 - 真实定位、真实微信/小程序 WebView 仍需真机人工验证。
 - 容错优化计划见 [docs/FAULT-TOLERANCE.md](docs/FAULT-TOLERANCE.md)。
 - 异步位置写入实验与对比见 [docs/FAULT-TOLERANCE-ASYNC.md](docs/FAULT-TOLERANCE-ASYNC.md)。
+- 玩家状态缓存 TTL 实验见 [docs/FAULT-TOLERANCE-CACHE.md](docs/FAULT-TOLERANCE-CACHE.md)。
 - Docker/openGauss 环境说明见 [docs/DOCKER-OPENGAUSS.md](docs/DOCKER-OPENGAUSS.md)。
 
 ## 目录

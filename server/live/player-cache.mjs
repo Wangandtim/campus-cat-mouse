@@ -1,6 +1,6 @@
 import { DatabaseBusyError } from '../db/capacity.mjs';
 
-const cacheMs = 12_000;
+const cacheMs = 30_000;
 const batchSize = 64;
 const batchDeadlineMs = 1000;
 

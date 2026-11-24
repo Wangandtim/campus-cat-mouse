@@ -72,7 +72,10 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   if (url.pathname === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify({ ok: true, service: 'campus-cat-mouse', time: clock() }));
+    res.end(JSON.stringify({
+      ok: true, service: 'campus-cat-mouse', time: clock(),
+      positionQueue: positionQueueStats?.(),
+    }));
     return;
   }
   if (/^\/(api|_AMapService)(?:\/|$)/.test(url.pathname)) return void api(req, res);
@@ -130,7 +133,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-const { io, profileChanged } = attachLivePositions(server, { game: liveGame, positions, redis, clock });
+const { io, profileChanged, positionQueueStats } = attachLivePositions(server, { game: liveGame, positions, redis, clock });
 limitLiveReports(io, checkLimit);
 const api = createPreviewApi(process.env, game, positions, profileChanged, checkLimit);
 await purgeExpiredExports(clock(), retention.exportRetentionMs)

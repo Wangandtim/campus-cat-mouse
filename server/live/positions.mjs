@@ -37,8 +37,19 @@ function newestPositions(points) {
   return [...byPlayer.values()];
 }
 
-export function attachLivePositions(httpServer, { game, positions, redis, clock = Date.now }) {
+const positionWriteBehind = process.env.CAMPUS_POSITION_WRITE_BEHIND === '1' ||
+  (process.env.CAMPUS_POSITION_WRITE_BEHIND !== '0' && process.env.NODE_ENV === 'production');
+
+export function attachLivePositions(httpServer, {
+  game, positions, redis, clock = Date.now,
+  writeBehind = positionWriteBehind,
+}) {
   const cache = createLivePlayerCache(game.getPlayers);
+  const writeShards = 32;
+  const writeQueues = Array.from({ length: writeShards }, () => ({ jobs: [], writing: false }));
+  const maxWriteQueuePerShard = 10_000;
+  let writeQueueDrops = 0;
+  let writeQueueRetries = 0;
   const io = new Server(httpServer, {
     connectionStateRecovery: { maxDisconnectionDuration: 120_000, skipMiddlewares: false },
     maxHttpBufferSize: 4096,
@@ -178,6 +189,64 @@ export function attachLivePositions(httpServer, { game, positions, redis, clock 
     return check.promise;
   }
 
+  async function persistPosition(peer, context, coordinates, now, sessionId) {
+    const position = await positions.save(peer.playerId, coordinates, now, sessionId, undefined, { requireSharing: true });
+    if (!position) return;
+    if (position.session_id !== context.event.id || position.role !== context.role) {
+      throw new GameError('INACTIVE', '当前未开启活动定位。');
+    }
+    return position;
+  }
+
+  function acceptPoint(peer, context, coordinates, updatedAt) {
+    const point = {
+      id: peer.id, member: peer.socket.id, instanceId, role: context.role,
+      lat: coordinates.lat, lng: coordinates.lng,
+      createdAt: peer.createdAt, updatedAt,
+      expiresAt: Math.min(context.event.endsAt, updatedAt + positionLifetimeMs),
+    };
+    peer.point = point;
+    void index.write(context.event, point, updatedAt);
+    return point;
+  }
+
+  function queueIndex(playerId) {
+    let hash = 0;
+    for (let i = 0; i < playerId.length; i++) hash = (hash * 31 + playerId.charCodeAt(i)) | 0;
+    return Math.abs(hash) % writeShards;
+  }
+
+  async function drainWriteQueue(shard) {
+    if (!writeBehind || shard.writing) return;
+    shard.writing = true;
+    try {
+      while (shard.jobs.length) {
+        const job = shard.jobs[0];
+        if (clock() >= job.context.event.endsAt) {
+          shard.jobs.shift();
+          writeQueueDrops++;
+          continue;
+        }
+        try {
+          await persistPosition(job.peer, job.context, job.coordinates, job.now, job.sessionId);
+          shard.jobs.shift();
+        } catch (error) {
+          if (isTemporaryWriteError(error)) {
+            writeQueueRetries++;
+            await delay(200 + Math.floor(Math.random() * 151));
+            continue;
+          }
+          // Permanent validation/session errors are dropped; the next accepted sample re-establishes state.
+          shard.jobs.shift();
+          writeQueueDrops++;
+        }
+      }
+    } finally {
+      shard.writing = false;
+      if (shard.jobs.length) void drainWriteQueue(shard);
+    }
+  }
+
   async function updatePosition(peer, report) {
     await syncRoom(peer, scope());
     if (!isLatestReport(peer, report)) return;
@@ -188,41 +257,49 @@ export function attachLivePositions(httpServer, { game, positions, redis, clock 
     if (Math.abs(coordinates.lat) > 85.05112878) throw new GameError('POSITION', '请提交有效的定位。', 400);
     const now = report.writeAt ??= clock();
     const sessionId = payload.sessionId ?? (context.registered ? context.event.id : undefined);
-    const canRetry = () => isLatestReport(peer, report) && peer.context === context && clock() < context.event.endsAt;
-    let backoff = !report.resent;
-    let position;
-    for (;;) {
-      try {
-        position = await positions.save(peer.playerId, coordinates, now, sessionId, undefined, { requireSharing: true });
-        break;
-      } catch (error) {
-        if (!isTemporaryWriteError(error)) throw error;
-        if (!canRetry()) return;
-        if (!backoff) {
-          report.resendAvailable = !report.resent && report.sampleId !== undefined;
-          peer.socket.emit('live:error', positionUnavailable, {
-            code: 'POSITION_RETRY_RETRYABLE', retryAfter: 1, sampleId: report.sampleId,
-          });
-          return;
+    if (!writeBehind) {
+      const canRetry = () => isLatestReport(peer, report) && peer.context === context && clock() < context.event.endsAt;
+      let backoff = !report.resent;
+      let position;
+      for (;;) {
+        try {
+          position = await positions.save(peer.playerId, coordinates, now, sessionId, undefined, { requireSharing: true });
+          break;
+        } catch (error) {
+          if (!isTemporaryWriteError(error)) throw error;
+          if (!canRetry()) return;
+          if (!backoff) {
+            report.resendAvailable = !report.resent && report.sampleId !== undefined;
+            peer.socket.emit('live:error', positionUnavailable, {
+              code: 'POSITION_RETRY_RETRYABLE', retryAfter: 1, sampleId: report.sampleId,
+            });
+            return;
+          }
+          backoff = false;
+          await delay(150 + Math.floor(Math.random() * 151));
+          if (!canRetry()) return;
         }
-        backoff = false;
-        await delay(150 + Math.floor(Math.random() * 151));
-        if (!canRetry()) return;
       }
+      if (!peer.socket.connected || peer.generation !== report.generation || peer.context !== context ||
+          clock() >= context.event.endsAt) return;
+      if (position?.session_id !== context.event.id || position.role !== context.role) {
+        throw new GameError('INACTIVE', '当前未开启活动定位。');
+      }
+      acceptPoint(peer, context, coordinates, position.updated_at ?? now);
+      return;
     }
-    if (!peer.socket.connected || peer.generation !== report.generation || peer.context !== context ||
-        clock() >= context.event.endsAt) return;
-    if (position?.session_id !== context.event.id || position.role !== context.role) {
-      throw new GameError('INACTIVE', '当前未开启活动定位。');
+
+    const queue = writeQueues[queueIndex(peer.playerId)];
+    if (queue.jobs.length >= maxWriteQueuePerShard) {
+      writeQueueDrops++;
+      peer.socket.emit('live:error', positionUnavailable, {
+        code: 'POSITION_QUEUE_FULL', retryAfter: 1, sampleId: report.sampleId,
+      });
+      return;
     }
-    const point = {
-      id: peer.id, member: peer.socket.id, instanceId, role: context.role,
-      lat: position.lat, lng: position.lng,
-      createdAt: peer.createdAt, updatedAt: position.updated_at,
-      expiresAt: Math.min(context.event.endsAt, position.updated_at + positionLifetimeMs),
-    };
-    peer.point = point;
-    void index.write(context.event, point, now);
+    acceptPoint(peer, context, coordinates, now);
+    queue.jobs.push({ peer, context, coordinates, now, sessionId });
+    void drainWriteQueue(queue);
   }
 
   const admissionStats = admitLiveConnections(io, async (req) => {
@@ -427,6 +504,11 @@ export function attachLivePositions(httpServer, { game, positions, redis, clock 
   });
   return {
     io, admissionStats,
+    positionQueueStats: () => ({
+      queued: writeQueues.reduce((sum, queue) => sum + queue.jobs.length, 0),
+      writing: writeQueues.filter((queue) => queue.writing).length,
+      drops: writeQueueDrops, retries: writeQueueRetries,
+    }),
     profileChanged(playerId) {
       const id = publicId(playerId);
       const at = clock();

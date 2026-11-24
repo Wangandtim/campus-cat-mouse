@@ -29,7 +29,7 @@ const output = resolve(args.out);
 const shards = Number(args.shards ?? 4);
 assert.ok(Number.isInteger(shards) && shards > 0 && shards <= 2010, '--shards must be between 1 and 2010');
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-  /^(path|systemroot|systemdrive|windir|temp|tmp|comspec|pathext|userprofile|localhost|appdata|localappdata|home|programfiles)$/i.test(key)));
+  /^(path|systemroot|systemdrive|windir|temp|tmp|comspec|pathext|userprofile|localhost|appdata|localappdata|home|programfiles|campus_position_write_behind)$/i.test(key)));
 const jobs = new Set();
 const epoch = Date.now();
 const total = 2010;

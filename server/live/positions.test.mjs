@@ -17,13 +17,13 @@ function nextSnapshot(socket) {
 }
 
 async function preview(t, clock, decorateLiveGame = (liveGame) => liveGame, redis,
-  decoratePositions = (positions) => positions) {
+  decoratePositions = (positions) => positions, writeBehind = false) {
   const directory = mkdtempSync(join(tmpdir(), 'campus-live-test-'));
   const { game, liveGame, positions, close } = openPreview(join(directory, 'test.sqlite3'), undefined, clock);
   const clients = [];
   const server = createServer((req, res) => void api(req, res));
-  const { io, profileChanged } = attachLivePositions(server, {
-    game: decorateLiveGame(liveGame), positions: decoratePositions(positions), clock, redis,
+  const { io, profileChanged, positionQueueStats } = attachLivePositions(server, {
+    game: decorateLiveGame(liveGame), positions: decoratePositions(positions), clock, redis, writeBehind,
   });
   const api = createPreviewApi({}, game, positions, profileChanged);
   t.after(async () => {
@@ -61,7 +61,7 @@ async function preview(t, clock, decorateLiveGame = (liveGame) => liveGame, redi
     return { socket, update, cookie, room: (await ready)[0] };
   }
 
-  return { base, client, player, profileChanged, positions, io };
+  return { base, client, player, profileChanged, positionQueueStats, positions, io };
 }
 
 const center = { lat: 34.17942, lng: 108.91808, accuracy: 13 };
@@ -108,6 +108,34 @@ for (const error of [new DatabaseBusyError('Database queue is full.'),
     assert.ok(attempts[1].at - attempts[0].at >= 145, 'the server waits before retrying');
   });
 }
+
+test('write-behind accepts a position without waiting for a stalled database and drains it later',
+  { timeout: 8000 }, async (t) => {
+    let failing = true;
+    let attempts = 0;
+    const server = await preview(t, () => activeTime, undefined, undefined, (positions) => ({
+      ...positions,
+      async save(...args) {
+        attempts++;
+        if (failing) throw new DatabaseBusyError('Database queue is full.');
+        return positions.save(...args);
+      },
+    }), true);
+    const { socket, cookie } = await server.player();
+    const id = cookie.split('=')[1];
+    let liveError;
+    socket.on('live:error', (message, detail) => { liveError = { message, detail }; });
+    socket.emit('live:position', sample(1));
+    for (let i = 0; i < 40 && attempts === 0; i++) await delay(10);
+    assert.equal(attempts, 1);
+    assert.equal(liveError, undefined);
+    assert.ok(server.positionQueueStats().queued >= 0);
+    failing = false;
+    const signal = AbortSignal.timeout(3000);
+    while ((await server.positions.get(id))?.lng !== sample(1).lng) await delay(10, undefined, { signal });
+    assert.equal(liveError, undefined);
+    assert.equal(server.positionQueueStats().drops, 0);
+  });
 
 test('issues a sample-specific retry hint and saves a successful resend only once', { timeout: 6000 }, async (t) => {
   const { socket, attempts, waitForStored } = await retryFixture(t, (_attempt, count) => {

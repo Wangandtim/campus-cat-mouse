@@ -123,6 +123,7 @@ pnpm test
 - 2000 并发目前是单机回环压测结果，不等于生产容量结论；上线前必须在目标 HTTPS/MySQL/Redis/微信链路重新压测。
 - 真实定位、真实微信/小程序 WebView 仍需真机人工验证。
 - 容错优化计划见 [docs/FAULT-TOLERANCE.md](docs/FAULT-TOLERANCE.md)。
+- 异步位置写入实验与对比见 [docs/FAULT-TOLERANCE-ASYNC.md](docs/FAULT-TOLERANCE-ASYNC.md)。
 - Docker/openGauss 环境说明见 [docs/DOCKER-OPENGAUSS.md](docs/DOCKER-OPENGAUSS.md)。
 
 ## 目录

@@ -67,6 +67,7 @@ export function useGame(allowed: Readonly<Ref<boolean>>) {
   let liveSocket: LiveSocket | undefined;
   let nextSampleId = 0;
   let latestLiveSample: LivePosition | undefined;
+  let reconnectSample: LivePosition | undefined;
   let positionRetryTimer: number | undefined;
   const playerScope = computed(() => {
     const game = state.value;
@@ -145,6 +146,7 @@ export function useGame(allowed: Readonly<Ref<boolean>>) {
     onCleanup(() => {
       stopped = true;
       cancelPositionRetry();
+      reconnectSample = undefined;
       liveSocket?.disconnect();
       liveSocket = undefined;
       liveRoom.value = undefined;
@@ -164,6 +166,13 @@ export function useGame(allowed: Readonly<Ref<boolean>>) {
         liveRoom.value = room;
         liveMarkers.value = [];
         liveMessage.value = '';
+        const sample = reconnectSample;
+        reconnectSample = undefined;
+        if (!sample || !canShare.value || !socket.connected || Date.now() - sample.sampledAt > positionLifetimeMs) return;
+        if (sample.sessionId && sample.sessionId !== trackingId.value) return;
+        const resumed = { ...sample, sampleId: ++nextSampleId, sampledAt: Date.now() };
+        latestLiveSample = resumed;
+        socket.volatile.emit('live:position', resumed);
       });
       socket.on('live:positions', (eventId, markers) => {
         if (canShare.value && liveRoom.value?.eventId === eventId) {
@@ -176,6 +185,7 @@ export function useGame(allowed: Readonly<Ref<boolean>>) {
       });
       socket.on('connect_error', () => { liveMessage.value = '实时位置暂未连接。'; });
       socket.on('disconnect', () => {
+        if (latestLiveSample) reconnectSample = latestLiveSample;
         cancelPositionRetry();
         liveRoom.value = undefined;
         liveMarkers.value = [];

@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createBrotliCompress, createGzip } from 'node:zlib';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createPreviewApi, createPreviewServices, openPreview } from './api.mjs';
@@ -97,15 +98,36 @@ const server = createServer(async (req, res) => {
     res.writeHead(404).end();
     return;
   }
-  res.writeHead(200, {
-    'Content-Type': mime[extname(file)] ?? 'application/octet-stream',
-    'Content-Length': statSync(file).size,
+  const metadata = statSync(file);
+  const type = mime[extname(file)] ?? 'application/octet-stream';
+  const accepts = String(req.headers['accept-encoding'] ?? '');
+  const encoding = accepts.includes('br') ? 'br' : accepts.includes('gzip') ? 'gzip' : '';
+  const compressible = /^(text\/|application\/(javascript|json|xml|manifest)|image\/svg)/.test(type) && metadata.size >= 1024;
+  const headers = {
+    'Content-Type': type,
     'Cache-Control': adminPage ? 'no-store' : url.pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache',
     'X-Content-Type-Options': 'nosniff',
     ...(adminPage ? { 'Content-Security-Policy': "frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' } : {}),
-  });
-  if (req.method === 'HEAD') res.end();
-  else createReadStream(file).pipe(res);
+  };
+  if (compressible) headers.Vary = 'Accept-Encoding';
+  if (encoding && compressible) {
+    headers['Content-Encoding'] = encoding;
+  } else {
+    headers['Content-Length'] = metadata.size;
+  }
+  res.writeHead(200, headers);
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
+  const source = createReadStream(file);
+  if (encoding && compressible) {
+    const encoder = encoding === 'br' ? createBrotliCompress() : createGzip();
+    source.on('error', () => res.destroy());
+    source.pipe(encoder).on('error', () => res.destroy()).pipe(res);
+  } else {
+    source.pipe(res);
+  }
 });
 
 const { io, profileChanged } = attachLivePositions(server, { game: liveGame, positions, redis, clock });

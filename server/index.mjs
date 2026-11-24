@@ -69,6 +69,11 @@ const mime = {
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
+  if (url.pathname === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ ok: true, service: 'campus-cat-mouse', time: clock() }));
+    return;
+  }
   if (/^\/(api|_AMapService)(?:\/|$)/.test(url.pathname)) return void api(req, res);
   if (!['GET', 'HEAD'].includes(req.method)) {
     res.writeHead(405).end();

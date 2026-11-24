@@ -85,6 +85,13 @@ pnpm start
 服务默认监听 `127.0.0.1:4173`，由 Nginx/负载均衡提供 HTTPS 和公网入口。
 MySQL 表结构会在启动时自动迁移。
 
+也可以使用 Docker：
+
+```sh
+docker build -t campus-cat-mouse .
+docker run --rm -p 4173:4173 --env-file .env.local campus-cat-mouse
+```
+
 ### 5. 教师入口
 
 - 学生 H5：`https://你的域名/`

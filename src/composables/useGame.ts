@@ -26,6 +26,8 @@ type LiveSocket = {
 
 const liveClientUrl = '/socket.io/socket.io.esm.min.js';
 const positionLifetimeMs = 15_000;
+// Match the server capture freshness window; beyond this, wait for a fresh GPS fix instead of replaying stale coordinates.
+const reconnectSampleMaxAgeMs = 30_000;
 export const liveMapKey: InjectionKey<{
   enabled: Ref<boolean>;
   canShare: ComputedRef<boolean>;
@@ -168,7 +170,7 @@ export function useGame(allowed: Readonly<Ref<boolean>>) {
         liveMessage.value = '';
         const sample = reconnectSample;
         reconnectSample = undefined;
-        if (!sample || !canShare.value || !socket.connected || Date.now() - sample.sampledAt > positionLifetimeMs) return;
+        if (!sample || !canShare.value || !socket.connected || Date.now() - sample.sampledAt > reconnectSampleMaxAgeMs) return;
         if (sample.sessionId && sample.sessionId !== trackingId.value) return;
         const resumed = { ...sample, sampleId: ++nextSampleId, sampledAt: Date.now() };
         latestLiveSample = resumed;

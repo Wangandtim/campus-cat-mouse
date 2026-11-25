@@ -224,7 +224,7 @@ onMounted(async () => {
     <h1>教师登录</h1>
     <p v-if="!ready" role="status">正在检查登录状态…</p>
     <form v-else class="teacher-form" @submit.prevent="login">
-      <label>教师账号<input v-model="loginAccount" autocomplete="username" maxlength="64" required /></label>
+      <label>工号或手机号<input v-model="loginAccount" autocomplete="username" maxlength="64" required /></label>
       <label>密码<input v-model="password" type="password" autocomplete="current-password" maxlength="256" required /></label>
       <p v-if="issue" class="inline-error" role="alert">{{ issue }}</p>
       <button type="submit" class="primary-button" :disabled="busy">登录</button>

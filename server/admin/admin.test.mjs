@@ -115,6 +115,7 @@ async function exerciseHttp(t, store, clock, entries) {
     CAMPUS_AUTH_MODE: 'mock', NODE_ENV: 'test', CAMPUS_ROSTER_CSV: '',
     CAMPUS_JWT_SECRET: studentKey.toString('base64url'), CAMPUS_TEACHER_ALLOWLIST: teacher.id,
     CAMPUS_TEACHER_PASSWORD_HASHES: JSON.stringify({ [teacher.id]: passwordHash }),
+    CAMPUS_TEACHER_ALIASES: JSON.stringify({ [teacher.id]: ['1001', '13800000000'] }),
     CAMPUS_TEACHER_JWT_SECRET: teacherKey.toString('base64url'),
   }, game, positions);
   const server = createServer(api).listen(0, '127.0.0.1');
@@ -140,6 +141,10 @@ async function exerciseHttp(t, store, clock, entries) {
   assert.equal(response.status, 200);
   assert.match(response.headers.get('set-cookie'), /^campus_teacher=.*; Path=\/; HttpOnly; SameSite=Lax;/);
   const teacherCookie = response.headers.get('set-cookie').split(';')[0];
+  const aliasResponse = await post('/api/teacher/login', { account: '13800000000', password: loginPassword });
+  assert.equal(aliasResponse.status, 200);
+  assert.deepEqual(await aliasResponse.json(), { account: teacher.id });
+  assert.match(aliasResponse.headers.get('set-cookie'), /^campus_teacher=/);
   assert.equal((await post('/api/admin/session', {}, teacherCookie, null)).status, 403);
   assert.equal((await post('/api/admin/session', {}, teacherCookie, 'https://other.invalid')).status, 403);
   for (const path of ['session', 'dashboard', 'students', 'assignments', 'interviews', 'anything']) {
